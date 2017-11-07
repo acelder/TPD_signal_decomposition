@@ -3,7 +3,7 @@ project(TPD_signal_decomposition)
 
 set(CMAKE_CXX_STANDARD 11)
 
-set(SOURCE_FILES main.cpp finite_difference_simulations.h microporous_plate_system.cpp)
+set(SOURCE_FILES main.cpp finite_difference_simulations.h microporous_plate_system.cpp microporous_sphere_system.cpp mesoporous_film_system.cpp surface_system.cpp simulate_experiment.cpp)
 add_executable(TPD_signal_decomposition ${SOURCE_FILES})
 
 # find boost

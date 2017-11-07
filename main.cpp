@@ -10,110 +10,52 @@
  */
 
 #include "finite_difference_simulations.h"
-#include <iostream>
-#include <fstream>
 
-
-
-#include <boost/numeric/odeint.hpp>
-
-#include <boost/phoenix/core.hpp>
-
-#include <boost/phoenix/operator.hpp>
 
 using namespace std;
 using namespace boost::numeric::odeint;
 namespace phoenix = boost::phoenix;
 
 
+int main( int argc , char **argv ) {
 
+    microporous_parameters p;
+    p.initial_temp = 120; // K
+    p.final_temp   = 300; // K
+    p.ramp_rate    = 0.25;// K/s
+    p.rho          = 1e15;
+    p.nu           = 1e13;
+    p.Ea           = 5e4;
+    p.adsorbate_mass = 2.99e-26;
+    p.site_mass    = 1.0552e-25;
+    p.site_radius  = 0.071e-9;
+    p.adsorbate_mass = 0.14e-9;
+    p.steric_factor = 1.0;
+    p.characteristic_length = 5e-8;
+    p.D_0 = 1e-11;
+    p.Ea_D = 3e4;
 
-//[ stiff_system_definition
-typedef boost::numeric::ublas::vector< double > vector_type;
-typedef boost::numeric::ublas::matrix< double > matrix_type;
+    boost_vector v (20);
+    boost_vector dvdx(20);
 
-struct stiff_system
-{
-    void operator()( const vector_type &x , vector_type &dxdt , double /* t */ )
-    {
-        dxdt[ 0 ] = -101.0 * x[ 0 ] - 100.0 * x[ 1 ];
-        dxdt[ 1 ] = x[ 0 ];
+    int i,j;
+    for(i=0; i<20; ++i){
+        v[i] = 1;
     }
-};
-
-struct params // use this approach rather than the vector hack
-{
-    double value;
-};
-
-struct stiff_system_2
-{
-    params p;
-
-    void operator()( const vector_type &x , vector_type &dxdt , double /* t */ )
-    {
-        dxdt[ 0 ] = p.value * x[ 0 ] - 100.0 * x[ 1 ];
-        dxdt[ 1 ] = x[ 0 ];
-    }
-
-    stiff_system_2(const params &p) : p(p) {}
-};
+    vector< boost_vector > states;
+    vector<double> times;
 
 
-
-struct stiff_system_jacobi
-{
-    void operator()( const vector_type & /* x */ , matrix_type &J , const double & /* t */ , vector_type &dfdt )
-    {
-        J( 0 , 0 ) = -101.0;
-        J( 0 , 1 ) = -100.0;
-        J( 1 , 0 ) = 1.0;
-        J( 1 , 1 ) = 0.0;
-        dfdt[0] = 0.0;
-        dfdt[1] = 0.0;
-    }
-};
-//]
+    size_t num_steps = integrate_const(make_dense_output< runge_kutta_dopri5<boost_vector>>(1.0e-6, 1.0e-6),
+                                       microporous_plate_system(p), v, 0.0, 900.0, 1.0,
+                                       push_back_state_and_time(states ,times));
 
 
-
-
-int main( int argc , char **argv )
-{
-    ofstream out_file;
-    out_file.open("example.csv");
-
-    params p;
-    p.value = -101.0;
-
-//    typedef runge_kutta_dopri5< vector_type > dopri5_type;
-//    typedef controlled_runge_kutta< dopri5_type > controlled_dopri5_type;
-//    typedef dense_output_runge_kutta< controlled_dopri5_type > dense_output_dopri5_type;
-    //[ integrate_stiff_system_alternative
-
-    vector_type x2( 2 , 1.0 );
-
-    size_t num_of_steps2 = integrate_const( make_dense_output< runge_kutta_dopri5< vector_type > >( 1.0e-6 , 1.0e-6 ) ,
-                                            stiff_system_2(p) , x2 , 0.0 , 50.0 , 0.01 ,
-                                            out_file << phoenix::arg_names::arg2 << "," << phoenix::arg_names::arg1[0] << "\n" );
-    //]
-    clog << num_of_steps2 << endl;
-    out_file.close();
-
-
-
-//    boost::function<void (const vector_type &x, vector_type &dxdt, double t)> f;
-//    f = stiff_system_2();
-//    vector_type x (2);
-//    x(0) = 1;
-//    x(1) = 0.5;
+    cout << num_steps;
+//    ofstream out_file;
+//    out_file.open("test.csv");
 //
-//    vector_type dx (2);
-//
-//    f(x, dx, 1);
-//
-//    cout << dx[0] << endl << dx[1] << endl;
-
+//    for(i=0; i<)
 
     return 0;
 }
