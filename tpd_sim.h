@@ -14,7 +14,10 @@
 #include "storage_adaptors.h"
 #include "interpolation.h"
 #include "optimization.h"
+#include <iostream>
+#include <fstream>
 #include <vector>
+#include <boost/algorithm/string.hpp>
 #include <boost/numeric/odeint.hpp>
 #include <boost/phoenix/core.hpp>
 #include <boost/phoenix/operator.hpp>
@@ -215,7 +218,40 @@ struct experimental_signal{
     ublas::vector<double> signal;
     double calibration;
 
-    probabilistic_graph fit_model;
+    gml::probabilistic_graph model;
+
+    /**
+     * @brief: Load cleaned experimental data from csv. Example format can be found in project files.
+     * @param file
+     */
+
+    void load_csv(string file, long n_points){
+
+        fstream infile;
+        infile.open(file);
+        string str;
+        vector<string> spl;
+
+        time.resize(n_points);
+        temperature.resize(n_points);
+        signal.resize(n_points);
+
+        int line = 0;
+        while(getline(infile, str)){
+            boost::split(spl, str, boost::is_any_of(","));
+            switch(line){
+                case 0: T_i = stod(spl[1]);
+                case 1: T_f = stod(spl[1]);
+                case 2: ramp = stod(spl[1]);// beware of spaces
+                default:
+                    int i = line - 3;
+                    time[i] = stod(spl[0]);
+                    temperature[i] = stod(spl[1]);
+                    signal[i] = stod(spl[2]);
+            }
+            ++line;
+        }
+    }
 
     /**
      * @brief: computes the residual vector between the stored experimental data and modeled data
@@ -274,7 +310,7 @@ struct experimental_signal{
         return residuals;
     }
 
-    opt_lib::optimum fit_kinetic_model(const ublas::vector<double> initial_guess, opt_lib::learning_parameters params){
+    void fit_kinetic_model(const ublas::vector<double> initial_guess, opt_lib::learning_parameters params){
         // fit model with gradient descent
         opt_lib::optimum lsq = opt_lib::gradient_descent( &score_kinetic_model, initial_guess, params );
 
@@ -309,10 +345,56 @@ struct experimental_signal{
 
         gml::probabilistic_graph surface_system (factors);
 
-        // return residuals and optimal parameters
-        return lsq;
+        // store model
+        model = surface_system;
+    }
+
+    void report_model( string name ){
+
+        composite_signal s_model = kinetic_signal(model, T_i, T_f, ramp);// this isn't an efficient way to do this but leave it for now
+        vector<ublas::vector<double>> interpolated_signals (s_model.partial_pressures.size());
+        // interpolate to align all rows of output
+        for(int i=0; i<interpolated_signals.size(); ++i){
+            interpolated_signals[i] = analysis::lin_interp(s_model.times[i], s_model.partial_pressures[i], time);
+        }
+
+        ublas::vector<double> interpolated_sum = analysis::lin_interp(s_model.times[0], s_model.total_pressure, time);
+
+        ofstream outfile;
+        outfile.open(name);
+
+        outfile << "Kinetic model fit parameters and interpolated data.";
+        outfile << "Site specific parameters:" << endl;
+        for(int i=0; i<model.get_variable("site")->canonical_column.size(); ++i){
+            outfile << "Site " << i << ": \n";
+            outfile << "Concentration: " << exp(model.get_variable("site")->canonical_column[i].g) << endl;
+            outfile << "Mean activation energy: " << model.get_variable("Ea")->canonical_column[i].mu << endl;
+            outfile << "Activation energy variance: " << model.get_variable("Ea")->canonical_column[i].Sigma << endl;
+            outfile << "Mean vibrational frequency: " << model.get_variable("v")->canonical_column[i].mu << endl;
+            outfile << endl;
+        }
+
+        outfile << "time,temperature,signal,";
+        for(int i=0; i<interpolated_signals.size(); ++i){
+            outfile << "site" << i << ",";
+        }
+        outfile << "model_composite" << endl;
+
+        for(int i=0; i<time.size(); ++i){
+            outfile << time[i] << ",";
+            outfile << temperature[i] << ",";
+            outfile << signal[i] << ",";
+            for(int j=0; j<interpolated_signals.size(); ++j){
+                outfile << interpolated_signals[j][i] << ",";
+            }
+            outfile << interpolated_sum[i] << endl;
+        }
+
+        outfile.close();
     }
 };
+
+
 
 
 

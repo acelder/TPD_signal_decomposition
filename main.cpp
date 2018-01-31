@@ -6,18 +6,16 @@
 
 using namespace std;
 
-template<class T>
-T get_max(T a, T b){
-    return (a > b?a:b);
-}
-
-
 int main( int argc , char **argv ) {
 
     clock_t t;
     t = clock();
 
     run_unit_tests();
+
+
+
+
 
 
     t = clock() - t;

@@ -3,7 +3,9 @@ project(TPD_signal_decomposition)
 
 set(CMAKE_CXX_STANDARD 11)
 
-set(SOURCE_FILES main.cpp finite_difference_simulations.h microporous_plate_system.cpp microporous_sphere_system.cpp mesoporous_film_system.cpp surface_system.cpp simulate_experiment.cpp)
+set(SOURCE_FILES main.cpp tpd_integration.h storage_adaptors.h
+        unit_tests.h lin_alg.h lin_alg.h factor_operations.h gaussian_operations.h
+        interpolation.h quadrature.h tpd_sim.h probabilistic_graph.h optimization.h)
 add_executable(TPD_signal_decomposition ${SOURCE_FILES})
 
 # find boost

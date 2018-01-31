@@ -2,7 +2,7 @@
 // Created by Alexander Elder on 11/3/17.
 //
 
-#include "finite_difference_simulations.h"
+#include "deprecated/finite_difference_simulations.h"
 
 surface_system::surface_system(const external_parameters &p) : p(p) {}
 
@@ -19,7 +19,7 @@ void surface_system::operator()(const boost_vector &x, boost_vector &dxdt, doubl
     double Ea      = p.Ea;
     double nu      = p.nu;
 
-    const double R = 8.324;
+    const double R = 8.314;
     double T       = T_0 + alpha*t;
     double k_des   = nu*exp(-Ea/(R*T));
 
