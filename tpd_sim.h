@@ -1,4 +1,5 @@
 //
+// Functions and classes for simulating temperature programmed desorption signals.
 // Created by Alexander Elder on 1/28/18.
 //
 
