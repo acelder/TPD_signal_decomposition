@@ -1,7 +1,8 @@
 //
+// Class definition and basic manipulation functions for factorization of joint hybrid distributions.
 // Created by Alexander Elder on 1/26/18.
 //
-//////Needs to be modified-functions should return pointers, not objects to be consistent with current type implementation.
+// 
 
 #ifndef TPD_SIGNAL_DECOMPOSITION_FACTOR_OPERATIONS_H
 #define TPD_SIGNAL_DECOMPOSITION_FACTOR_OPERATIONS_H
