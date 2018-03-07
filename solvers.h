@@ -1,4 +1,5 @@
 //
+// Numerical root-finding algorithms for nonlinear algebraic equations.
 // Created by Alexander Elder on 2/15/18.
 //
 
@@ -25,7 +26,10 @@ namespace lin_alg{
             long max_iter;
             ublas::matrix<double> J;
         };
-
+        
+        /**
+         * Newton-Raphson.
+         */
         ublas::vector<double> fsolve(ublas::vector<double> (*f)(ublas::vector<double>),
                                      ublas::vector<double> initial, solver_opt options){
             double threshold = options.threshold;
