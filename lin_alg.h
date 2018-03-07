@@ -255,6 +255,11 @@ namespace lin_alg{
         det_U = det_L, det_P = 1;
         det_A = det_U * det_L;
     }
+
+    ublas::vector<double> left_mult(ublas::matrix<double> A, ublas::vector<double> x){
+        ublas::vector<double> b = ublas::prod(A, x);
+        return b;
+    }
 }
 
 #endif //TPD_SIGNAL_DECOMPOSITION_LIN_ALG_H

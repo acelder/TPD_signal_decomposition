@@ -1,7 +1,4 @@
 //
-// Created by Alexander Elder on 1/15/18.
-//
-
 //
 //  Copyright (c) 2000-2006
 //  Joerg Walter, Mathias Koch, Michael Stevens, Gunter Winkler

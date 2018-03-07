@@ -8,6 +8,7 @@
 #include "lin_alg.h"
 #include <string>
 #include <set>
+#include <algorithm>
 #include <unordered_map>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/io.hpp>
@@ -18,11 +19,15 @@ namespace ublas = boost::numeric::ublas;
 
 const double pi =  3.1415926535897;
 
+/**
+ * Gaussian distribution expressed as a canonical form, also stores mean and variance.
+ */
+
 namespace gml {
     // declarations
     struct canonical_form;
 
-    canonical_form vacuous_form(set <string> continuous_vars);
+    canonical_form* vacuous_form(set <string> continuous_vars);
     canonical_form canonical_product(canonical_form *form1, canonical_form *form2);
     canonical_form canonical_quotient(const canonical_form *numerator, const canonical_form *denominator);
     canonical_form canonical_marginal(canonical_form *joint_form, set <string> vars);
@@ -34,24 +39,38 @@ namespace gml {
     struct canonical_form{
         set<string> scope;
         ublas::matrix<double> K; // inverse variance if positive definite
-        ublas::matrix<double> h; // inverse variance left multiplied on mean vector (Kh = mu)
+        ublas::vector<double> h; // inverse variance left multiplied on mean vector (Kh = mu)
         double g;
 
         ublas::matrix<double> Sigma;
-        ublas::matrix<double> mu;
+        ublas::vector<double> mu;
 
 
         canonical_form() = default;
-
+        explicit canonical_form(canonical_form* ptr){
+            for(auto member: ptr->scope){
+                scope.insert(member);
+            }
+            K = ptr->K;
+            h = ptr->h;
+            g = ptr->g;
+            Sigma = ptr->Sigma;
+            mu = ptr->mu;
+        }
         explicit canonical_form(double g) : g(g){
             K.resize(1,1);
             h.resize(1,1);
             K(0,0) = 0;
-            h(0,0) = 0;
+            h(0) = 0;
         }
+
+        canonical_form(set<string> scope, ublas::matrix<double> Sigma, ublas::vector<double> mu, double g)
+                : g(g), Sigma(Sigma), mu(mu), K(inverse(Sigma)), h(ublas::prod(K, mu)) {}
 
         void compute_variance();
         void compute_mean();
+        void compute_canonical_parameters();
+        virtual double density( ublas::vector<double> &x);
     };
 
     /**
@@ -71,6 +90,108 @@ namespace gml {
     }
 
     /**
+     * @brief: Compute K and h from Sigma and mu
+     */
+
+    void canonical_form::compute_canonical_parameters() {
+        // compute K and h
+        K = inverse(Sigma);
+        h = ublas::prod(K, mu);
+
+        // compute g
+        long n = mu.size();
+        double mu_h = ublas::inner_prod(mu, h);
+        double det_Sigma = det(Sigma);
+        g = -0.5*mu_h - log(pow(2*pi, n/2)*sqrt(det_Sigma));
+    }
+
+    /**
+     * @brief: Compute the probability density at x
+     * @param x : value of random variable
+     * @return : probability density of x
+     */
+
+    double canonical_form::density( ublas::vector<double> &x){
+        if(K.size1() != Sigma.size1()){
+            compute_canonical_parameters();
+        }
+
+
+
+        ublas::vector<double> d = x - mu;
+        ublas::vector<double> Kd = ublas::prod(K, d);
+        double dKd = ublas::inner_prod(d, Kd);
+        double N = x.size();
+        double denom = pow(2*pi, N/2.0)*sqrt(det(Sigma));
+        double density = exp(-0.5*dKd)/denom;
+
+        return density;
+    }
+
+    struct skew_canonical_form : public canonical_form{
+        ublas::vector<double> skew;
+
+        skew_canonical_form() = default;
+        skew_canonical_form(ublas::vector<double> skew) : skew(skew) {}
+
+        skew_canonical_form(set<string> &scope, ublas::matrix<double> &Sigma,
+                            ublas::vector<double> &mu, double g, ublas::vector<double> skew)
+                : canonical_form(scope, Sigma, mu, g), skew(skew) {}
+
+
+        double density( ublas::vector<double> &x);
+    };
+
+    /**
+     * @brief Compute the density of a multivariate skew-normal distribution
+     * @param x
+     * @return
+     */
+
+    double skew_canonical_form::density( ublas::vector<double> &x) {
+        // maintain a bit of notational consistency with MATLAB prototype
+        ublas::vector<double> lambda = skew;
+        // let N = dimension of the scope
+        int N = scope.size();
+        // compute delta
+        ublas::matrix<double> Delta = eye(N);
+        for(int i=0; i<N; ++i){
+            Delta(i,i) = sqrt(1 - lambda[i]/sqrt(1 + lambda[i]*lambda[i]));
+        }
+        // compute alpha
+        // numerator
+        ublas::matrix<double> S_inv = inverse(Sigma);
+        ublas::matrix<double> D_inv = inverse(Delta);
+        ublas::matrix<double> SD_inv = ublas::prod(S_inv, D_inv);
+        ublas::vector<double> numerator = ublas::prod(ublas::trans(lambda), SD_inv);
+
+        // denominator
+        ublas::vector<double> S_invL = ublas::prod(S_inv, lambda);
+        double LS_invL = ublas::inner_prod(lambda, S_invL);
+        double denominator = sqrt(1 + LS_invL);
+        ublas::vector<double> alpha = numerator/denominator;
+
+        // compute omega
+        ublas::matrix<double> Lambda = ublas::outer_prod(lambda, lambda);
+        ublas::matrix<double> Omega = Sigma + Lambda;
+        Omega = ublas::prod(Delta, Omega);
+        Omega = ublas::prod(Omega, Delta);
+
+        // compute density
+        ublas::matrix<double> O_inv = inverse(Omega);
+        ublas::vector<double> r = x - mu;
+        ublas::vector<double> O_invR = ublas::prod(O_inv, r);
+        double power = ublas::inner_prod(r, O_invR);
+        double det_O = det(Omega);
+        denominator = sqrt(pow(2*pi, N) * det_O);
+        double f = exp(-0.5 * power)/denominator;
+        double erf_arg = ublas::inner_prod(alpha, r);
+        f = f * (1 + erf(erf_arg));
+        return f;
+    }
+
+
+    /**
      * \brief: Returns a vacuous form over the set of variables.
      * @param dimension
      * @return vacuous form
@@ -78,21 +199,21 @@ namespace gml {
      * Notes:
      * -passes manual test, automated test not necessary at this time
      */
-    canonical_form vacuous_form(set<string> continuous_vars){
+    canonical_form* vacuous_form(set<string> continuous_vars){
         double dimension = continuous_vars.size();
-        canonical_form vac_form;
-        vac_form.scope = continuous_vars;
-        vac_form.K.resize(dimension, dimension);
-        vac_form.h.resize(dimension, 1);
+        canonical_form* vac_form = new canonical_form;
+        vac_form->scope = continuous_vars;
+        vac_form->K.resize(dimension, dimension);
+        vac_form->h.resize(dimension, 1);
 
         for(int i=0; i<dimension; ++i){
-            vac_form.h(i,0) = 0;
+            vac_form->h(i) = 0;
             for(int j=0; j<dimension; ++j){
-                vac_form.K(i,j) = 0;
+                vac_form->K(i,j) = 0;
             }
         }
 
-        vac_form.g = 0;
+        vac_form->g = 0;
         return vac_form;
     }
 
@@ -123,8 +244,8 @@ namespace gml {
         // compute product h and K matrix-this implementation is somewhat naive but faster wouldn't give dramatically better speed
         ublas::matrix<double> K1 (scope.size(), scope.size());
         ublas::matrix<double> K2 (scope.size(), scope.size());
-        ublas::matrix<double> h1 (scope.size(), 1);
-        ublas::matrix<double> h2 (scope.size(), 1);
+        ublas::vector<double> h1 (scope.size(), 1);
+        ublas::vector<double> h2 (scope.size(), 1);
 
         set<string>::iterator it1, it2;
         i = 0;
@@ -132,16 +253,16 @@ namespace gml {
         for(it1=scope.begin(); it1!=scope.end(); ++it1){
             // if the variable pointed to by it1 is not in a given form scope, set its h value to zero, otherwise maps
             if(form1->scope.find(*it1) == form1->scope.end()){
-                h1(i,0) = 0;
+                h1(i) = 0;
             }
             else{
-                h1(i,0) = form1->h(map1[*it1],0);
+                h1(i) = form1->h(map1[*it1]);
             }
             if(form2->scope.find(*it1) == form2->scope.end()){
-                h2(i,0) = 0;
+                h2(i) = 0;
             }
             else{
-                h2(i,0) = form2->h(map2[*it1], 0);
+                h2(i) = form2->h(map2[*it1]);
             }
 
             j = 0;
@@ -196,8 +317,8 @@ namespace gml {
         // compute product h and K matrix-this implementation is somewhat naive but faster wouldn't give dramatically better speed
         ublas::matrix<double> K1 (scope.size(), scope.size());
         ublas::matrix<double> K2 (scope.size(), scope.size());
-        ublas::matrix<double> h1 (scope.size(), 1);
-        ublas::matrix<double> h2 (scope.size(), 1);
+        ublas::vector<double> h1 (scope.size(), 1);
+        ublas::vector<double> h2 (scope.size(), 1);
 
         set<string>::iterator it1, it2;
         i = 0;
@@ -205,16 +326,16 @@ namespace gml {
         for(it1=scope.begin(); it1!=scope.end(); ++it1){
             // if the variable pointed to by it1 is not in a given form scope, set its h value to zero, otherwise maps
             if(form1->scope.find(*it1) == form1->scope.end()){
-                h1(i,0) = 0;
+                h1(i) = 0;
             }
             else{
-                h1(i,0) = form1->h(map1[*it1],0);
+                h1(i) = form1->h(map1[*it1]);
             }
             if(form2->scope.find(*it1) == form2->scope.end()){
-                h2(i,0) = 0;
+                h2(i) = 0;
             }
             else{
-                h2(i,0) = form2->h(map2[*it1], 0);
+                h2(i) = form2->h(map2[*it1]);
             }
 
             j = 0;
@@ -271,11 +392,11 @@ namespace gml {
         ublas::matrix<double> K_xy (marginal_scope.size(), vars.size());
         ublas::matrix<double> K_yx (vars.size(), marginal_scope.size());
 
-        ublas::matrix<double> h_x (marginal_scope.size(),1);
-        ublas::matrix<double> h_y (vars.size(),1);
+        ublas::vector<double> h_x (marginal_scope.size());
+        ublas::vector<double> h_y (vars.size());
         i = 0;
         for(it1=marginal_scope.begin(); it1!=marginal_scope.end(); ++it1){
-            h_x(i,0) = joint_form->h(joint_map[*it1],0);
+            h_x(i) = joint_form->h(joint_map[*it1]);
             j = 0;
             for(it2=marginal_scope.begin(); it2!=marginal_scope.end(); ++it2){
                 K_xx(i,j) = joint_form->K(joint_map[*it1], joint_map[*it2]);
@@ -285,7 +406,7 @@ namespace gml {
         }
         i = 0;
         for(it1=vars.begin(); it1!=vars.end(); ++it1){
-            h_y(i,0) = joint_form->h(joint_map[*it1], 0);
+            h_y(i) = joint_form->h(joint_map[*it1]);
             j = 0;
             for(it2=vars.begin(); it2!=vars.end(); ++it2){
                 K_yy(i,j) = joint_form->K(joint_map[*it1], joint_map[*it2]);
@@ -318,15 +439,16 @@ namespace gml {
         ublas::matrix<double> K_xy_K_yy_inv = ublas::prod(K_xy, K_yy_inv);
         ublas::matrix<double> K = K_xx - ublas::prod( K_xy_K_yy_inv, K_yx);
 
-        ublas::matrix<double> Kh_inv = ublas::prod(K_yy_inv, h_y);
-        ublas::matrix<double> K_xy_Kh_inv = ublas::prod(K_xy, K_yy_inv);
-
-
         // compute marginal h vector
-        ublas::matrix<double> h = h_x - K_xy_Kh_inv;
+        ublas::matrix<double> K_xyK_yyInv = ublas::prod(K_xy, K_yy_inv);
+        ublas::vector<double> h_modifier = ublas::prod(K_xyK_yyInv, h_y);
+
+
+        ublas::vector<double> h = h_x - h_modifier;
         // compute marginal g value
-        ublas::matrix<double> hKh = ublas::prod(ublas::trans(h_y), Kh_inv);
-        double g = joint_form->g+0.5*(log(2*pi*det(K_yy_inv, true)) + hKh(0,0));
+        ublas::vector<double> K_yyInvh_y = ublas::prod(K_yy_inv, h_y);
+        double hKh = ublas::inner_prod(h_y, K_yyInvh_y);
+        double g = joint_form->g+0.5*(log(2*pi*det(K_yy_inv, true)) + hKh);
 
         canonical_form marginal;
         marginal.scope = marginal_scope;
@@ -344,7 +466,7 @@ namespace gml {
      * @return : reduced form
      */
 
-    canonical_form canonical_reduction(canonical_form* joint_form, set<string> vars, ublas::matrix<double> y){
+    canonical_form canonical_reduction(canonical_form* joint_form, set<string> vars, ublas::vector<double> y){
         // declare a random access iterator over sets of strings
         set<string>::iterator it1, it2;
         // map variables to their order in the joint matrix
@@ -368,11 +490,11 @@ namespace gml {
         ublas::matrix<double> K_xy (unassigned_scope.size(), vars.size());
         ublas::matrix<double> K_yx (vars.size(), unassigned_scope.size());
 
-        ublas::matrix<double> h_x (unassigned_scope.size(), 1);
-        ublas::matrix<double> h_y (vars.size(), 1);
+        ublas::vector<double> h_x (unassigned_scope.size(), 1);
+        ublas::vector<double> h_y (vars.size(), 1);
         i = 0;
         for(it1=unassigned_scope.begin(); it1!=unassigned_scope.end(); ++it1){
-            h_x(i,0) = joint_form->h(joint_map[*it1], 0);
+            h_x(i) = joint_form->h(joint_map[*it1]);
             j = 0;
             for(it2=unassigned_scope.begin(); it2!=unassigned_scope.end(); ++it2){
                 K_xx(i,j) = joint_form->K(joint_map[*it1], joint_map[*it2]);
@@ -382,7 +504,7 @@ namespace gml {
         }
         i = 0;
         for(it1=vars.begin(); it1!=vars.end(); ++it1){
-            h_y(i,0) = joint_form->h(joint_map[*it1], 0);
+            h_y(i) = joint_form->h(joint_map[*it1]);
             j = 0;
             for(it2=vars.begin(); it2!=vars.end(); ++it2){
                 K_yy(i,j) = joint_form->K(joint_map[*it1], joint_map[*it2]);
@@ -410,14 +532,15 @@ namespace gml {
         }
 
         // assign new h vector
-        ublas::matrix<double> h = h_x - prod(K_xy, y);
+        ublas::vector<double> K_xy_y = ublas::prod(K_xy, y);
+        ublas::vector<double> h = h_x - K_xy_y;
 
         // assign new g value
-        ublas::matrix<double> K_yyY = prod(y,K_yy);
-        ublas::matrix<double> yKy   = prod( K_yyY, y);
+        ublas::vector<double> K_yyY = ublas::prod(y,K_yy);
+        double yKy = ublas::inner_prod( K_yyY, y);
 
-        ublas::matrix<double> hy    = prod(h_y, trans(y));
-        double g = joint_form->g + hy(0,0) - 0.5*yKy(0,0);
+        double hy    = ublas::inner_prod(h_y, y);
+        double g = joint_form->g + hy - 0.5*yKy;
 
         canonical_form reduced_form;
         reduced_form.scope = unassigned_scope;
@@ -446,7 +569,7 @@ namespace gml {
         canonical_form collapsed_form;
         collapsed_form.scope = form_A->scope;
         collapsed_form.K.resize(form_A->K.size1(), form_B->K.size2());
-        collapsed_form.h.resize(form_A->h.size1(), 1);
+        collapsed_form.h.resize(form_A->h.size(), 1);
 
         if( abs(det_K_A) < 1e-14 or abs(det_K_B) < 1e-14){
             double d = exp(form_A->g) + exp(form_B->g);
@@ -455,36 +578,37 @@ namespace gml {
         else {// this functionality hasn't yet been tested-not necessary for TPD integration
             ublas::matrix<double> Sigma_A = inverse(form_A->K, true);
             ublas::matrix<double> Sigma_B = inverse(form_B->K, true);
-            ublas::matrix<double> mu_A = ublas::prod(Sigma_A, form_A->h);
-            ublas::matrix<double> mu_B = ublas::prod(Sigma_B, form_B->h);
+            ublas::vector<double> mu_A = ublas::prod(Sigma_A, form_A->h);
+            ublas::vector<double> mu_B = ublas::prod(Sigma_B, form_B->h);
 
             double n = form_A->scope.size();
             double det_Sigma_A = det(Sigma_A, true);
             double det_Sigma_B = det(Sigma_B, true);
 
-            ublas::matrix<double> temp_A = ublas::prod(ublas::trans(mu_A), form_A->h);
-            ublas::matrix<double> temp_B = ublas::prod(ublas::trans(mu_B), form_B->h);
+            double temp_A = ublas::inner_prod(mu_A, form_A->h);
+            double temp_B = ublas::inner_prod(mu_B, form_B->h);
 
-            double d_A = form_A->g - 0.5*temp_A(0,0) - log(pow(2*pi,n/2)*pow(det_Sigma_A, 0.5));
-            double d_B = form_B->g - 0.5*temp_B(0,0) - log(pow(2*pi,n/2)*pow(det_Sigma_B, 0.5));
+            double d_A = form_A->g - 0.5*temp_A - log(pow(2*pi,n/2)*pow(det_Sigma_A, 0.5));
+            double d_B = form_B->g - 0.5*temp_B - log(pow(2*pi,n/2)*pow(det_Sigma_B, 0.5));
 
             double w_A = log(d_A);
             double w_B = log(d_B);
 
-            ublas::matrix<double> mu = w_A*mu_A + w_B*mu_B;
-            ublas::matrix<double> mu_diff_A = mu_A - mu;
-            ublas::matrix<double> mu_diff_B = mu_B - mu;
-            ublas::matrix<double> Sigma = w_A*Sigma_A + w_B*Sigma_B + w_A*ublas::prod(mu_diff_A, ublas::trans(mu_diff_A))
-                                          + w_B*ublas::prod(mu_diff_B, ublas::trans(mu_diff_B));
+            ublas::vector<double> mu_AB = w_A*mu_A + w_B*mu_B; // weighted sum of means
+            ublas::vector<double> mu_diff_A = mu_A - mu_AB;
+            ublas::vector<double> mu_diff_B = mu_B - mu_AB;
+            ublas::matrix<double> mu_mat_A = ublas::outer_prod(mu_diff_A, mu_diff_A);
+            ublas::matrix<double> mu_mat_B = ublas::outer_prod(mu_diff_B, mu_diff_B);
+            ublas::matrix<double> Sigma = w_A*Sigma_A + w_B*Sigma_B + w_A*mu_mat_A + w_B*mu_mat_B;
 
             collapsed_form.K = inverse(Sigma);
-            collapsed_form.h = ublas::prod(collapsed_form.K, mu);
+            collapsed_form.h = ublas::prod(collapsed_form.K, mu_AB);
             // compute new g
             ublas::matrix<double> S_inv = inverse(Sigma);
-            ublas::matrix<double> S_inv_mu = ublas::prod(S_inv, mu);
-            ublas::matrix<double> mu_S_inv_mu = ublas::prod(trans(mu), S_inv_mu);
+            ublas::vector<double> S_inv_mu = ublas::prod(S_inv, mu_AB);
+            double mu_S_inv_mu = ublas::inner_prod(mu_AB, S_inv_mu);
             double det_Sigma = det(Sigma, true);
-            collapsed_form.g = -0.5*mu_S_inv_mu(0,0) - log(pow(2*pi, n/2)*pow(det_Sigma, 0.5));
+            collapsed_form.g = -0.5*mu_S_inv_mu - log(pow(2*pi, n/2)*pow(det_Sigma, 0.5));
         }
 
 

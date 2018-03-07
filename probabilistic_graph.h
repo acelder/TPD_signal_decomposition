@@ -16,33 +16,30 @@ using namespace std;
 
 namespace gml{
     class probabilistic_graph{
-        vector<variable*>variables;
+        vector<variable *> variables;
 
-        vector<factor*> factors;
+        vector<factor *> factors;
     public:
         unordered_map<string, variable*> variable_map;
         unordered_map<string, factor*> factor_map;
 
         // constructor
         probabilistic_graph() = default;
-        probabilistic_graph( vector<factor*> factor_list );
+        probabilistic_graph( vector<factor *> factor_list );
 
         // get attribute functions
         int get_num_variables();
-        variable *get_variable(int variable_index);
-        variable *get_variable(string variable_name);
-
         int get_num_factors();
-        factor *get_factor(int factor_index);
-        factor *get_factor(string factor_name);
+
 
         // member functions
+
         void observe_evidence(variable *target_variable, int var_assign);
 
 
     };
 
-    probabilistic_graph::probabilistic_graph( vector<factor*> factor_list ){
+    probabilistic_graph::probabilistic_graph( vector<factor *> factor_list ){
         for(auto fac : factor_list){
             // add factor to graph factor list
             factors.push_back(fac);
@@ -62,25 +59,11 @@ namespace gml{
         return variables.size();
     }
 
-    variable *probabilistic_graph::get_variable(int variable_index) {
-        return variables[variable_index];
-    }
-
-    variable *probabilistic_graph::get_variable(string variable_name) {
-        return variable_map[variable_name];
-    }
 
     int probabilistic_graph::get_num_factors() {
         return factors.size();
     }
 
-    factor *probabilistic_graph::get_factor(int factor_index){
-        return factors[factor_index];
-    }
-
-    factor *probabilistic_graph::get_factor(string factor_name){
-        return factor_map[factor_name];
-    }
 
     void probabilistic_graph::observe_evidence(variable *target_variable, int var_assign) {
         for(int i=0; i<factors.size(); ++i){

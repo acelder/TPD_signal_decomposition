@@ -40,13 +40,13 @@ namespace lin_alg{
             it i;
 
             for(int j=0; j<x_q.size(); ++j){
-                i = data.upper_bound(x_q[i]);
+                i = data.upper_bound(x_q[j]);
                 // edge cases
                 if(i==data.end()){
-                    fx_q[i] = (--i)->second;
+                    fx_q[j] = (--i)->second;
                 }
                 else if(i==data.begin()){
-                    fx_q[i] = i->second;
+                    fx_q[j] = i->second;
                 }
                 else{
                     it l = i; --l;

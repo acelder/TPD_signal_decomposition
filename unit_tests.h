@@ -64,10 +64,10 @@ bool canonical_form_constructor_test(){
     default_random_engine re;
 
     double_matrix K_test (3,3);
-    double_matrix h_test (3,1);
+    double_vector h_test (3,1);
     double g_test = unif(re);
     for(int i=0; i<3; ++i){
-        h_test(i,0) = unif(re);
+        h_test(i) = unif(re);
         for(int j=0; j<3; ++j){
             K_test(i,j) = unif(re);
         }
@@ -89,7 +89,7 @@ bool canonical_form_constructor_test(){
         pass_flag = false;
     }
     for(int i=0; i<3; ++i){
-        if( abs(h_test(i,0) - cf_test.h(i,0)) > 1e-6 ){
+        if( abs(h_test(i) - cf_test.h(i)) > 1e-6 ){
             pass_flag = false;
         }
         for(int j=0; j<3; ++j){
@@ -125,8 +125,8 @@ bool variable_constructor_test(){
 bool factor_constructor_test1(){
     string test_name = "phi1";
     variable var1 ("A", 2);
-    var1.canonical_column[0].g = log(0.4);
-    var1.canonical_column[0].g = log(0.6);
+    var1.canonical_column[0]->g = log(0.4);
+    var1.canonical_column[1]->g = log(0.6);
 
     factor phi1 (test_name, &var1);
 
@@ -137,7 +137,7 @@ bool factor_constructor_test1(){
         pass_flag = false;
     }
     for(int j=0; j<2; ++j){
-        if( abs( phi1.canonical_table(j).g - var1.canonical_column[j].g ) > 1e-3 ){
+        if( abs( phi1.canonical_table(j)->g - var1.canonical_column[j]->g ) > 1e-3 ){
             pass_flag = false;
         }
     }
@@ -291,8 +291,8 @@ bool canonical_product_test(){
     f1->K = eye(2);
 
     f1->h.resize(2,1);
-    f1->h(0,0) = 1.0;
-    f1->h(1,0) = 2.0;
+    f1->h(0) = 1.0;
+    f1->h(1) = 2.0;
 
     f1->g = -3.0;
 
@@ -304,8 +304,8 @@ bool canonical_product_test(){
     f2->K = 2.0*f2->K;
 
     f2->h.resize(2,1);
-    f2->h(0,0) = -1.0;
-    f2->h(1,0) = 1.0;
+    f2->h(0) = -1.0;
+    f2->h(1) = 1.0;
 
     f2->g = 1;
 
@@ -325,7 +325,7 @@ bool canonical_product_test(){
     bool pass_flag = true;
 
     for(int i=0; i<3; ++i){
-        if( abs(f_prod.h(i,0) - correct_h[i]) > 1e-8 ){
+        if( abs(f_prod.h(i) - correct_h[i]) > 1e-8 ){
             pass_flag = false;
             break;
         }
@@ -359,8 +359,8 @@ bool canonical_quotient_test(){
     f1->K = eye(2);
 
     f1->h.resize(2,1);
-    f1->h(0,0) = 1.0;
-    f1->h(1,0) = 2.0;
+    f1->h(0) = 1.0;
+    f1->h(1) = 2.0;
 
     f1->g = -3.0;
 
@@ -372,8 +372,8 @@ bool canonical_quotient_test(){
     f2->K = 2.0*f2->K;
 
     f2->h.resize(2,1);
-    f2->h(0,0) = -1.0;
-    f2->h(1,0) = 1.0;
+    f2->h(0) = -1.0;
+    f2->h(1) = 1.0;
 
     f2->g = 1;
 
@@ -393,7 +393,7 @@ bool canonical_quotient_test(){
     bool pass_flag = true;
 
     for(int i=0; i<3; ++i){
-        if( abs(f_quot.h(i,0) - correct_h[i]) > 1e-8 ){
+        if( abs(f_quot.h(i) - correct_h[i]) > 1e-8 ){
             pass_flag = false;
             break;
         }
@@ -427,7 +427,7 @@ bool canonical_marginal_test(){
             2,1,3
     };
 
-    double test_h_values[3][1] = {3,2,1};
+    double test_h_values[3] = {3,2,1};
 
     double test_g = 1;
 
@@ -439,7 +439,7 @@ bool canonical_marginal_test(){
     test_form.K = ublas::make_matrix_from_pointer(test_K_values);
 
     test_form.h.resize(3,1);
-    test_form.h = ublas::make_matrix_from_pointer(test_h_values);
+    test_form.h = ublas::make_vector_from_pointer(3, test_h_values);
 
     test_form.g = 1;
 
@@ -459,7 +459,7 @@ bool canonical_marginal_test(){
 
 
     for(int i=0; i<2; ++i){
-        if( abs(test_marginal.h(i,0) - true_marginal_h[i]) > 1e-3 ){ pass_flag = false; }
+        if( abs(test_marginal.h(i) - true_marginal_h[i]) > 1e-3 ){ pass_flag = false; }
         for(int j=0; j<2; ++j){
             if( abs(test_marginal.K(i,j) - true_marginal_K[i][j]) > 1e-3 ){ pass_flag = false; break; }
         }
@@ -482,11 +482,7 @@ bool canonical_reduction_test(){
             2,2,3
     };
 
-    double test_h_values[3][1] = {
-            3,
-            2,
-            1
-    };
+    double test_h_values[3] = {3, 2, 1};
 
     canonical_form test_form;
     test_form.scope.insert("A");
@@ -496,15 +492,14 @@ bool canonical_reduction_test(){
     test_form.K = ublas::make_matrix_from_pointer(test_K_values);
 
     test_form.h.resize(3,1);
-    test_form.h = ublas::make_matrix_from_pointer(test_h_values);
+    test_form.h = ublas::make_vector_from_pointer(3, test_h_values);
 
     test_form.g = 1;
 
     set<string> reduced_vars;
     reduced_vars.insert("C");
 
-    double_matrix assignment(1,1);
-    assignment(0,0) = 3;
+    double_vector assignment(1, 3);
 
     // run canonical_reduction on test_form
     canonical_form test_reduction = canonical_reduction(&test_form, reduced_vars, assignment);
@@ -519,7 +514,7 @@ bool canonical_reduction_test(){
     bool pass_flag = true;
 
     for(int i=0; i<2; ++i){
-        if( abs(test_reduction.h(i,0) - correct_reduced_h[i]) > 1e-3 ){ pass_flag = false; }
+        if( abs(test_reduction.h(i) - correct_reduced_h[i]) > 1e-3 ){ pass_flag = false; }
         for(int j=0; j<2; ++j){
             if( abs(test_reduction.K(i,j) - correct_reduced_K[i][j]) > 1e-3){ pass_flag = false; }
         }
@@ -550,20 +545,20 @@ bool factor_product_test1(){
     C.canonical_column[0] = vacuous_form(c_vars);
     C.canonical_column[1] = vacuous_form(c_vars);
 
-    C.canonical_column[0].g = log(0.1);
-    C.canonical_column[1].g = log(0.9);
+    C.canonical_column[0]->g = log(0.1);
+    C.canonical_column[1]->g = log(0.9);
 
     factor phi_1 ("phi_1", &C);
     factor phi_2 ("phi_2", &D);
 
-    factor phi_3 = factor_product(&phi_1, &phi_2, "phi_3");
+    factor phi_3 = *factor_product(&phi_1, &phi_2, "phi_3");
 
     bool pass_flag = true;
 
-    if( abs(phi_3.canonical_table[0].g - log(0.1)) > 1e-5 or
-            abs(phi_3.canonical_table[1].g - log(0.9)) > 1e-5 or
-            abs(phi_3.canonical_table[2].g - log(0.1)) > 1e-5 or
-            abs(phi_3.canonical_table[3].g - log(0.9)) > 1e-5){
+    if( abs(phi_3.canonical_table[0]->g - log(0.1)) > 1e-5 or
+            abs(phi_3.canonical_table[1]->g - log(0.9)) > 1e-5 or
+            abs(phi_3.canonical_table[2]->g - log(0.1)) > 1e-5 or
+            abs(phi_3.canonical_table[3]->g - log(0.9)) > 1e-5){
         pass_flag = false;
     }
 
@@ -585,29 +580,29 @@ bool factor_product_test2(){
     D.canonical_column[0] = vacuous_form(c_vars);
     D.canonical_column[1] = vacuous_form(c_vars);
 
-    D.canonical_column[0].g = log(0.1);
-    D.canonical_column[1].g = log(0.9);
+    D.canonical_column[0]->g = log(0.1);
+    D.canonical_column[1]->g = log(0.9);
 
     // initialize non-identity factor
     variable C ("C", 2);
     C.canonical_column[0] = vacuous_form(c_vars);
     C.canonical_column[1] = vacuous_form(c_vars);
 
-    C.canonical_column[0].g = log(0.4);
-    C.canonical_column[1].g = log(0.6);
+    C.canonical_column[0]->g = log(0.4);
+    C.canonical_column[1]->g = log(0.6);
 
 
     factor phi_1 ("phi_1", &C);
     factor phi_2 ("phi_2", &D);
 
-    factor phi_3 = factor_product(&phi_1, &phi_2, "phi_3");
+    factor phi_3 = *factor_product(&phi_1, &phi_2, "phi_3");
 
     bool pass_flag = true;
 
-    if( abs(phi_3.canonical_table[0].g - log(0.04)) > 1e-5 or
-        abs(phi_3.canonical_table[1].g - log(0.06)) > 1e-5 or
-        abs(phi_3.canonical_table[2].g - log(0.36)) > 1e-5 or
-        abs(phi_3.canonical_table[3].g - log(0.54)) > 1e-5){
+    if( abs(phi_3.canonical_table[0]->g - log(0.04)) > 1e-5 or
+        abs(phi_3.canonical_table[1]->g - log(0.06)) > 1e-5 or
+        abs(phi_3.canonical_table[2]->g - log(0.36)) > 1e-5 or
+        abs(phi_3.canonical_table[3]->g - log(0.54)) > 1e-5){
         pass_flag = false;
     }
 
@@ -629,28 +624,28 @@ bool discrete_marginal_test1(){
     variable C ("C", 2);
     C.canonical_column[0] = vacuous_form(c_vars);
     C.canonical_column[1] = vacuous_form(c_vars);
-    C.canonical_column[0].g = log(0.4);
-    C.canonical_column[1].g = log(0.6);
+    C.canonical_column[0]->g = log(0.4);
+    C.canonical_column[1]->g = log(0.6);
 
     // initialize all one factor
     variable D ("D", 2);
     D.canonical_column[0] = vacuous_form(c_vars);
     D.canonical_column[1] = vacuous_form(c_vars);
 
-    D.canonical_column[0].g = log(0.1);
-    D.canonical_column[1].g = log(0.9);
+    D.canonical_column[0]->g = log(0.1);
+    D.canonical_column[1]->g = log(0.9);
 
     factor phi_1 ("phi_1", &C);
     factor phi_2 ("phi_2", &D);
 
-    factor phi_3 = factor_product(&phi_1, &phi_2, "phi_3");
+    factor phi_3 = *factor_product(&phi_1, &phi_2, "phi_3");
 
-    factor phi_4 = discrete_marginal(&phi_3, &C, "marg_4");
+    factor phi_4 = *discrete_marginal(&phi_3, &C, "marg_4");
 
     bool pass_flag = true;
 
-    if( abs(phi_4.canonical_table[0].g - log(0.1)) > 1e-5 or
-            abs(phi_4.canonical_table[1].g - log(0.9)) > 1e-5){
+    if( abs(phi_4.canonical_table[0]->g - log(0.1)) > 1e-5 or
+            abs(phi_4.canonical_table[1]->g - log(0.9)) > 1e-5){
         pass_flag = false;
     }
     return pass_flag;
@@ -726,7 +721,7 @@ void factor_tests(){
     cout << "Testing discrete factor marginalization...\n";
     bool marginal_result = discrete_marginal_test1();
     report(marginal_result);
-    cout << "Tests complete!";
+    cout << "Tests complete!\n";
 }
 
 void run_unit_tests(){

@@ -1,6 +1,7 @@
 //
 // Created by Alexander Elder on 1/26/18.
 //
+//////Needs to be modified-functions should return pointers, not objects to be consistent with current type implementation.
 
 #ifndef TPD_SIGNAL_DECOMPOSITION_FACTOR_OPERATIONS_H
 #define TPD_SIGNAL_DECOMPOSITION_FACTOR_OPERATIONS_H
@@ -27,8 +28,8 @@ namespace gml{
     class factor;
 
     // factor manipulation functions
-    factor factor_product( factor* factor1, factor* factor2, const string& name );
-    factor discrete_marginal( factor* target_factor, variable* target_variable, const string& name );
+    factor* factor_product( factor* factor1, factor* factor2, const string& name );
+    factor* discrete_marginal( factor* target_factor, variable* target_variable, const string& name );
 
 
     struct variable{
@@ -37,7 +38,7 @@ namespace gml{
         // table CPD parameters
         int cardinality;
         // canonical form parameters
-        ublas::vector<canonical_form> canonical_column;
+        ublas::vector<canonical_form*> canonical_column;
         // vector of factors with variable in scope
         vector<factor*> factors;
         // discrete indicator
@@ -46,6 +47,15 @@ namespace gml{
         variable(string name = "default") : name(move(name)) {}
         variable(string name = "default", int cardinality = 1) : name(move(name)), cardinality(cardinality){
             canonical_column.resize(cardinality);
+            for(int i=0; i<cardinality; ++i){
+                canonical_column[i] = new canonical_form;
+            }
+        }
+
+        virtual ~variable() {
+            for(int i=0; i<canonical_column.size(); ++i){
+                delete canonical_column[i];
+            }
         }
 
     };
@@ -63,7 +73,7 @@ namespace gml{
         // scope and values
         set<variable*> scope;
         set<string> continuous_scope;// !! NOT YET IMPLEMENTED
-        ublas::vector<canonical_form> canonical_table;
+        ublas::vector<canonical_form*> canonical_table;
 
         // Gaussian canonical form
 
@@ -73,8 +83,14 @@ namespace gml{
 
         // constructors and destructor
         explicit factor(string name = "default") : name(move(name)) {}
-        factor(factor *ptr);
+        explicit factor(factor *ptr);
         factor(string name, variable* var);
+
+        virtual ~factor(){
+            for(int i=0; i<canonical_table.size(); ++i){
+                delete canonical_table[i];
+            }
+        }
 
         // factor manipulation functions
         void print();
@@ -82,7 +98,6 @@ namespace gml{
         ublas::matrix<int> assignment(const ublas::vector<int>& index);
         ublas::vector<int> index(const ublas::matrix<int>& assignment);
         void observe_evidence( variable* target_variable, int var_assign );
-
     };
 
     factor::factor(factor *ptr){
@@ -99,13 +114,17 @@ namespace gml{
      * @param name : name of factor
      * @param var : variable in factor scope
      */
-    factor::factor(string name, variable* var) : name(move(name)) {
+    factor::factor(string name, variable* var) : name(name) {
         scope.insert(var); // add variable to scope
         var->factors.push_back(this); // add reference to this factor to the variable's factor list
         // assign variable values to the factor
         canonical_table.resize(var->cardinality);
+
+        // We want factors to have their own data, so that operations on factors can happen independent of underlying
+        // variables. To this end, we'll copy each entry of canonical table of the input variable
         for(int i=0; i<var->cardinality; ++i){
-            canonical_table(i) = var->canonical_column(i);
+            auto *form_copy = new canonical_form(var->canonical_column(i));
+            canonical_table(i) = form_copy;
         }
 
     }
@@ -141,7 +160,7 @@ namespace gml{
         for(int i=0; i<num_entries; ++i){
             ublas::vector<int> index (1);
             index(0) = i;// assignment function requires vector type, overload later
-            cout << assignment(index) << " " << exp(canonical_table(i).g) << endl;
+            cout << assignment(index) << " " << exp(canonical_table(i)->g) << endl;
         }
         cout << endl;
     }
@@ -226,7 +245,7 @@ namespace gml{
 
         for(int j=0; j<N; ++j){
             if(A(j,i) != var_assign){
-                canonical_table[j].g = -INFINITY;
+                canonical_table[j]->g = -INFINITY;
             }
         }
     }
@@ -238,11 +257,11 @@ namespace gml{
      * @param name : name of new factor
      * @return : product of factor1 and factor2
      */
-    factor factor_product( factor* factor1, factor* factor2, const string& name ){
+    factor* factor_product( factor* factor1, factor* factor2, const string& name ){
 
         // check that the scopes of each factor are not empty
-        if( factor1->scope.empty() ){ return *factor2; }
-        if( factor2->scope.empty() ){ return *factor1; }
+        if( factor1->scope.empty() ){ return factor2; }
+        if( factor2->scope.empty() ){ return factor1; }
 
         set<variable*> scope;
 
@@ -288,16 +307,18 @@ namespace gml{
         }
 
         // main loop
-        ublas::vector<canonical_form> canonical_table (n_vals);
+        ublas::vector<canonical_form*> canonical_table (n_vals);// this needs to be updated for table of pointers
         vector<int> assignment(scope.size(), 0); // initialize assignment vector
 
-        ublas::vector<canonical_form> phi1 = factor1->canonical_table; // extract value arrays
-        ublas::vector<canonical_form> phi2 = factor2->canonical_table;
+        ublas::vector<canonical_form*> phi1 = factor1->canonical_table; // extract value arrays
+        ublas::vector<canonical_form*> phi2 = factor2->canonical_table;
+
 
         int j = 0, k = 0;
         for(i=0; i<canonical_table.size(); ++i){
             // canonical form product
-            canonical_table[i] = canonical_product(&phi1[j], &phi2[k]);
+            canonical_form p = canonical_product(phi1[j], phi2[k]);// compute the canonical product, which is locally output to the stack
+            canonical_table[i] = new canonical_form(&p);// copy the canonical form to the heap to access it out of scope
             int l = 0;
             for(auto& it : scope){
                 assignment[l]++;
@@ -316,9 +337,9 @@ namespace gml{
         }
 
         // construct product factor
-        factor product (name);
-        product.scope = scope;
-        product.canonical_table = canonical_table;
+        factor* product = new factor(name);
+        product->scope = scope;
+        product->canonical_table = canonical_table;// consider returning a pointer
 
         return product;
     }
@@ -332,7 +353,7 @@ namespace gml{
      * @return  : a (possibly normalized) marginalization of the join_factor
      */
 
-    factor discrete_marginal( factor* joint_factor, variable* target_variable, const string& name ){
+    factor* discrete_marginal( factor* joint_factor, variable* target_variable, const string& name ){
 
         vector<int> stride = joint_factor->compute_stride();
         unordered_map<string, int> stride_joint;
@@ -353,28 +374,28 @@ namespace gml{
             ++i;
         }
 
-        factor marginal_factor = factor(name); // construct new factor
-        marginal_factor.scope = marginal_scope;
-        stride = marginal_factor.compute_stride();
+        factor* marginal_factor = new factor(name); // construct new factor
+        marginal_factor->scope = marginal_scope;
+        stride = marginal_factor->compute_stride();
         i = 0;
-        for(auto& it : marginal_factor.scope){
+        for(auto& it : marginal_factor->scope){
             stride_marginal[it->name] = stride[i];
         }
 
         // main loop
         long n_vals = joint_factor->canonical_table.size()/target_variable->cardinality; // number of values in marginalized table
-        marginal_factor.canonical_table.resize(n_vals);
+        marginal_factor->canonical_table.resize(n_vals);
         vector<int> assignment (marginal_scope.size(), 0);
         int k = 0;
         for(i=0; i<n_vals; ++i){
             // compute marginal over current assignment
-            canonical_form marginal_val = joint_factor->canonical_table(k); // first value
+            canonical_form marginal_val = *joint_factor->canonical_table(k); // first value
             for(int j=1; j<target_variable->cardinality; ++j){
                 int s = stride_joint[target_variable->name];
-                canonical_form next_val = joint_factor->canonical_table(k + j*s);// subsequent values
+                canonical_form next_val = *joint_factor->canonical_table(k + j*s);// subsequent values
                 marginal_val = canonical_collapse(&marginal_val, &next_val);
             }
-            marginal_factor.canonical_table(i) = marginal_val;
+            marginal_factor->canonical_table(i) = new canonical_form(&marginal_val);// move the locally computed marginal value onto the heap
 
             // update assignment vector
             int l = 0;
