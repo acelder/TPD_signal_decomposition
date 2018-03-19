@@ -15,6 +15,7 @@
 #include "interpolation.h"
 #include "optimization.h"
 #include "quadrature.h"
+#include "gaussian_operations.h"
 #include <iostream>
 #include <numeric>
 #include <fstream>
@@ -32,163 +33,16 @@ using namespace lin_alg;
 using namespace boost::numeric::odeint;
 namespace ublas = boost::numeric::ublas;
 
-/**
- * @brief compute the joint density over reaction probability, vibrational frequency, and activation energy
- * @param fv : distribution function for vibrational frequency
- * @param fEa : distribution function for activaiton energy
- * @param v : vibrational frequency
- * @param Ea : activation energy
- * @param T : temperature
- * @return
- */
 
-double joint_density( canonical_form* fEa, canonical_form* fv, ublas::vector<double> r, double T){
-    double R = 8.3144598;
-    ublas::vector<double> Ea_vec (1, r(0));
-    ublas::vector<double> v_vec (1, r(1));
-    double density = fv->density(v_vec)*fEa->density(Ea_vec)*exp(-Ea_vec(0)/(R*T));
-    return density;
-}
-
-double rate_integrand(canonical_form* fEa, canonical_form* fv, ublas::vector<double> r, double T){
-    double R = 8.3144598;
-    ublas::vector<double> Ea_vec (1, r(0));
-    ublas::vector<double> v_vec (1, r(1));
-    double rate_contribution = r(1)*fv->density(v_vec)*fEa->density(Ea_vec)*exp(-Ea_vec(0)/(R*T));
-    return rate_contribution;
-}
-
-/**
- * @brief A silly implementation of skew bivariate distribution density. Keep for now given deadline constraints.
- * @param fEa
- * @param fv
- * @param r a vector in Energy-Frequency space
- * @return
- */
-
-double skew_bivariate_density(canonical_form* fEa, canonical_form* fv,
-                                             ublas::vector<double> r){
-    ublas::vector<double> Ea_vec (1, r(0));
-    ublas::vector<double> v_vec (1, r(1));
-    double density = fv->density(v_vec)*fEa->density(Ea_vec);
-    return density;
-}
-
-/**
- * Integrates over bivariate joint density by rotating and centering the distribution overlaying bivariate skew normal distribution
- * @param fv
- * @param fEa
- * @param T
- * @param error : maximum allowable error
- * @return
- *
- * still needs to be tested
- */
-
-double integrate_rate_contributions( canonical_form* fEa, canonical_form* fv, double T, double error = 0.01){
-    // This subroutine will make extensive use of function bindings so let's go ahead and use the placeholders namespace.
-    using namespace std::placeholders;
-
-    // Begin by finding the peak of the unmodified bivariate distribution. This is necessary to establish the rectangular
-    // boundary of integration about the distribution.
-
-    // Bind the skew_bivariate_density function to the input Gaussians.
-    // density_func(Ea_vec, v_vec) returns the density of the input Gaussians at Ea_vec, v_vec
-    function<double(ublas::vector<double>)> density_func = bind(skew_bivariate_density, fEa, fv, _1);
-
-    // Find the peak using gradient ascent.
-    ublas::vector<double> initial_guess (2); // set initial guess
-    initial_guess(0) = fEa->mu(0);
-    initial_guess(1) = fv->mu(0);
-    opt_lib::learning_parameters params(0.1, 1000, 0.1);// set learning parameters
-    opt_lib::optimum skew_peak = opt_lib::gradient_ascent(density_func, initial_guess, params);
-
-
-
-
-    // In order to determine the correct bounds of integration, first locate the direction of slowest descent about the
-    // center. This will be accomplished with the following rotary search algorithm.
-    int n_angles = 360; // Let's just brute force this for now and search 360 degrees about the center
-    double max_density = skew_peak.opt;
-    vector<double> theta (n_angles,0);
-    vector<double> secants (n_angles, 0);
-    for(int i=0; i<n_angles; ++i){
-        theta[i] = 2*pi*i/n_angles;
-        // measure the slope of the secant line between the optimum and arg_opt + 0.1 at angle theta
-        ublas::vector<double> r = skew_peak.arg_opt;
-        r(0) += cos(theta[i])*0.1;
-        r(0) += sin(theta[i])*0.1;
-        double shifted_density = skew_bivariate_density(fEa, fv, r);
-        secants[i] = max_density - shifted_density; // could compute as euclidean distance but not necessary here
-    }
-    long ind = distance(secants.begin(), min_element(secants.begin(), secants.end()));// get minimum descent direction
-    double search_angle = theta[ind];
-
-
-    // Now perform a one-dimensional line search with unit step size. Might want to optimize this later.
-    ublas::vector<double> corner_one (2,0);
-    ublas::vector<double> line_search_position = skew_peak.arg_opt;
-    for(int i=0; i<1000; ++i){
-        ublas::vector<double> new_line_search_position (2);
-        new_line_search_position(0) = line_search_position(0) + cos(search_angle); // stick with a unit step length for now,
-        new_line_search_position(1) = line_search_position(1) + sin(search_angle); // maybe implement adaptive step lengh later
-
-        double new_density = skew_bivariate_density(fEa, fv, new_line_search_position);
-
-        if(new_density < error){
-            corner_one = new_line_search_position;
-        }
-        else{
-            line_search_position = new_line_search_position;
-        }
-    }
-
-    // With the first corner and the search angle in hand, we can compute the other three corners of the integration
-    // square. Start by reflecting the first corner across the vertical axis.
-    ublas::vector<double> corner_two = corner_one;
-    corner_two(0) *= -1;
-
-    // Find the next corner by reflecting the first through the origin.
-    ublas::vector<double> corner_three = corner_one;
-    corner_three(0) *= -1;
-    corner_three(1) *= -1;
-
-    // Find the final corner by reflecting the first across the horizontal axis
-    ublas::vector<double> corner_four = corner_one;
-    corner_four(1) *= -1;
-
-    double Ea_coords [4] = {corner_one(0), corner_two(0), corner_three(0), corner_four(0)};
-    double v_coords [4] = {corner_one(1), corner_two(1), corner_three(1), corner_four(1)};
-
-    double* Ea_lower_bound = min_element(Ea_coords, Ea_coords+4);
-    double* Ea_upper_bound = max_element(Ea_coords, Ea_coords+4);
-    double* v_lower_bound = min_element(v_coords, v_coords+4);
-    double* v_upper_bound = max_element(v_coords, v_coords+4);
-
-    // Finally, bind the full joint distribution with the specific parameters and integrate over the selected region.
-    // joint_density_func(r) returns joint probability density over frequency, activation energy, and reaction probability
-
-    ublas::matrix<double> integration_range (2,2);
-    integration_range(0,0) = *Ea_lower_bound;
-    integration_range(0,1) = *Ea_upper_bound;
-    integration_range(1,0) = *v_lower_bound;
-    integration_range(1,1) = *v_upper_bound;
-
-    function<double(ublas::vector<double>)> contribution_func = bind(rate_integrand, fEa, fv, _1, T);//
-
-    ublas::vector<long> n_domains (2, 100);
-
-    double integral = lin_alg::analysis::dbl_newton_cotes(contribution_func, n_domains, integration_range, "simpson" );
-    return integral;
-}
 
 /**
  * @brief: Structure that represents a surface chemical system.
  */
 struct site_system{
 
-    canonical_form* fEa;
-    canonical_form* fv;
+    double fractional_coverage;
+    double Ea;
+    double nu;
 
     double ramp;
     double T_i;
@@ -197,8 +51,8 @@ struct site_system{
     void operator()( const ublas::vector<double> &C, ublas::vector<double> &dC, double t );
 
     site_system() = default;
-    site_system(canonical_form* fEa, canonical_form* fv, double ramp, double T_i) :
-            fEa(fEa), fv(fv), ramp(ramp), T_i(T_i) {}
+    site_system( double coverage, double Ea, double nu, double ramp, double T_i) :
+            fractional_coverage(coverage), Ea(Ea), nu(nu), ramp(ramp), T_i(T_i) {}
 };
 
 /**
@@ -214,25 +68,34 @@ void site_system::operator()(const ublas::vector<double> &C, ublas::vector<doubl
     const double R = 8.3144598; // J/molK
 
     // compute the integral over the joint distribution of vibrational frequency, activation energy, and reaction probability
-    double P_reaction = integrate_rate_contributions(fEa, fv, T);
+    double P_activation = exp(-Ea/(R*T)); // activation energy stored in mu(0)
+    double P_configuration = nu; // assume zero variance in the vibrational frequency
+    P_reaction = P_activation * P_configuration;
 
     // compute the rate of surface concentration change
     dC[0] = -C[0]*P_reaction;
 }
 
 struct site_system_jacobi{
-    site_system* deriv;
+    double Ea;
+    double nu;
 
+    double ramp;
+    double T_i;
+    double P_reaction;
 
     void operator()( const ublas::vector<double> &C, ublas::matrix<double> &J, double t);//, ublas::vector<double> dfdt );
 
     site_system_jacobi() = default;
-    site_system_jacobi(site_system* deriv) : deriv(deriv) {}
+    site_system_jacobi(const site_system &deriv) : Ea(deriv.Ea), nu(deriv.nu), ramp(deriv.ramp), T_i(deriv.T_i) {}
 };
 
 void site_system_jacobi::operator()(const ublas::vector<double> &C, ublas::matrix<double> &J, const double t){
-    J(0,0) = deriv->P_reaction;
-
+    const double R = 8.3144598;
+    double T = T_i + ramp*t;
+    double P_activation = exp(-Ea/(R*T)); // activation energy stored in mu(0)
+    double P_configuration = nu; // assume zero variance in the vibrational frequency
+    J(0,0) = P_activation * P_configuration;
 }
 
 /**
@@ -272,6 +135,7 @@ struct composite_signal{
     ublas::vector<double> total_pressure;
 
     ublas::vector<double> compute_temperature(int i) const;
+    void interpolate_rates();
     void compute_pressures();
     void interpolate_total_pressure();
     void normalize();
@@ -291,6 +155,13 @@ ublas::vector<double> composite_signal::compute_temperature(int i) const{
     return T;
 }
 
+void composite_signal::interpolate_rates(){
+    long N = rates.size();
+    for(int j=0; j<N; ++j){
+        rates[j] = analysis::lin_interp(times[j], rates[j], times[0]);
+    }
+}
+
 /**
  * @brief: Computes partial pressures from simulated desorption rates
  */
@@ -302,7 +173,10 @@ void composite_signal::compute_pressures() {
         for(int j=0; j<rates[i].size(); ++j){
             partial_pressures[i][j] = R*T*rates[i][j]/flow_rate;
         }
+        // interpolate
+        partial_pressures[i] = analysis::lin_interp(times[i], rates[i], times[0]);
     }
+
 }
 
 /**
@@ -342,34 +216,29 @@ void composite_signal::normalize(){
  * @return
  */
 
-composite_signal kinetic_signal(gml::probabilistic_graph *surface_system, double T_i, double T_f, double ramp){
-    // compute the signal parameters for each site
-    gml::variable *site = surface_system->variable_map["site"];
-    gml::factor *phi_Ea = surface_system->factor_map["Ea"];// extract the activation energy factor
-    gml::factor *phi_v = surface_system->factor_map["v"]; // extract the pre-exponential factor
-    //
-
-
+composite_signal kinetic_signal(vector<double> site_distribution, vector<double> activation_energies,
+                                vector<double> prefactors, double T_i, double T_f, double ramp){
     // compute initial and final time
     double t = 0.0;
     double t_f = (T_f - T_i)/ramp;
 
     // initialize vector of signal vectors, each signal vector associated with a site
+    size_t num_sites = site_distribution.size();
     composite_signal sig;
-    sig.states.resize((size_t)site->cardinality);//
-    sig.rates.resize((size_t)site->cardinality);
-    sig.times.resize((size_t)site->cardinality);
+    sig.states.resize(num_sites);//
+    sig.rates.resize(num_sites);
+    sig.times.resize(num_sites);
     sig.ramp = ramp;
     sig.T_i = T_i;
 
     // iterate over each site, this should only be tabulated over the number of sites-update for multiple gases
-    for(int i=0; i<site->cardinality; ++i){
+    for(int i=0; i<num_sites; ++i){
 
-        double mu_E = phi_Ea->canonical_table[i]->mu(0);
-        double s_E = phi_Ea->canonical_table[i]->Sigma(0,0);
-        double mu_v = phi_Ea->canonical_table[i]->mu(0);
+        double Ea = activation_energies[i];
+        double v  = prefactors[i];
+        double site_coverage = site_distribution[i];
 
-        ublas::vector<double> C (1, exp(site->canonical_column[i]->g));
+        ublas::vector<double> C (1, site_coverage);
 
         // temporarily store signal and time in these vectors
 
@@ -379,9 +248,9 @@ composite_signal kinetic_signal(gml::probabilistic_graph *surface_system, double
         // simulation loop
         typedef boost::numeric::odeint::implicit_euler< double > booststepper;
         auto stepper = booststepper();
-        site_system system = site_system(phi_Ea->canonical_table[i], phi_v->canonical_table[i], ramp, T_i);
-        site_system_jacobi jacobi = site_system_jacobi(&system);
-        double dt = 0.1;
+        site_system system = site_system(site_coverage, Ea, v, ramp, T_i);
+        site_system_jacobi jacobi = site_system_jacobi(system);
+        double dt = 1;
         auto ode = make_pair(system, jacobi);
         const double min_threshold = 0.001*C[0];// might want to make this more flexible
 
@@ -406,7 +275,6 @@ composite_signal kinetic_signal(gml::probabilistic_graph *surface_system, double
         }
 
         // compute the desorption rate from the integrated state and time values
-        site_system s_sys (phi_Ea->canonical_table[i], phi_v->canonical_table[i], ramp, T_i);
         vector<double> rate (state_log.size());
 
 
@@ -423,8 +291,8 @@ composite_signal kinetic_signal(gml::probabilistic_graph *surface_system, double
 
             // compute and store the rate
             ublas::vector<double> temp_rate (1);
-            s_sys(L.second, temp_rate, L.first);
-            sig.rates[i][j] = temp_rate[0];
+            system(L.second, temp_rate, L.first);
+            sig.rates[i][j] = -temp_rate[0];
             ++j;
         }
     }
@@ -517,188 +385,7 @@ public:
         return residuals;
     }
 
-    /**
-     * @brief: computes the residuals given a vector of model parameters
-     * @param kinetic_parameters : reaction kinetic parameters
-     * @return : redidual vector
-     */
 
-    double score_kinetic_model( ublas::vector<double> kinetic_parameters ){
-        // assumes first N kinetic parameters are mean activation energies, second N are activation energy variances,
-        // and third N are mean vibrational frequencies, and fourth N are total site coverages
-        long N = kinetic_parameters.size()/4;
-
-        gml::variable site ("site", N);
-        gml::variable Ea ("Ea", N);
-        gml::variable v ("v", N);
-
-        for(int i=0; i<N; ++i){
-            Ea.canonical_column[i]->mu.resize(1,1);
-            Ea.canonical_column[i]->mu(0) = kinetic_parameters[i];
-            Ea.canonical_column[i]->Sigma.resize(1,1);
-            Ea.canonical_column[i]->Sigma(0,0) = kinetic_parameters[N+i];
-
-            v.canonical_column[i]->mu.resize(1,1);
-            v.canonical_column[i]->mu(0) = kinetic_parameters[2*N+i];
-
-            site.canonical_column[i]->g = log(kinetic_parameters[3*N+i]);
-        }
-
-        gml::factor phi_1 ("site", &site);
-        gml::factor phi_2 ("Ea", &Ea);
-        gml::factor phi_3 ("v", &v);
-
-        vector<gml::factor*> factors = {
-                &phi_1, &phi_2, &phi_3
-        };
-
-        gml::probabilistic_graph surface_system (factors);
-        composite_signal s = kinetic_signal(&surface_system, T_i, T_f, ramp);
-        ublas::vector<double> residuals = compute_residuals(s);
-        double ssr = 0.0;
-        for(auto resid: residuals){
-            ssr += pow(resid, 2);
-        }
-        return ssr;// return sum of squared residuals
-    }
-
-    /**
-     * @brief: Fits kinetic model to the loaded data given an initial guess
-     * @param initial_guess
-     * @param params
-     */
-
-    void fit_kinetic_model(const ublas::vector<double> initial_guess, opt_lib::learning_parameters params){
-
-
-        // fit model with gradient descent
-
-        long N = initial_guess.size();
-        ublas::vector<double> x = initial_guess;
-        ublas::vector<double> x_prev;
-        ublas::vector<double> e (N, 0);
-
-        for(int i=0; i<params.num_iter; ++i){
-
-            for(int i=0; i<params.num_iter; ++i){
-                ublas::vector<double> central_difference (N, 0);
-                // compute the central difference approximation of the gradient
-                for(int j=0; j<N; ++j){
-                    ublas::vector<double> e (N, 0);
-                    e(j) = opt_lib::eps;
-                    ublas::vector<double> forward_difference = x + e;
-                    ublas::vector<double> backward_difference = x - e;
-                    double forward_eval = score_kinetic_model(forward_difference);
-                    double backward_eval= score_kinetic_model(backward_difference);
-                    central_difference(j) = (forward_eval - backward_eval)/(2*opt_lib::eps);
-
-                }
-
-                x_prev = x;
-                x = x - params.rate*central_difference;// subtract the gradient to descend the valley
-                if(ublas::norm_1(x - x_prev) <= params.convergence_criterion){
-                    break;
-                }
-            }
-
-        }
-
-        opt_lib::optimum lsq;
-        lsq.arg_opt = x;
-        lsq.opt = score_kinetic_model(x);
-
-
-        // store parameters in probabilistic graph
-        ublas::vector<double> kinetic_parameters = lsq.arg_opt;
-        N = kinetic_parameters.size()/4;// NOTE: N redefined here
-
-        // N_1 = Mu_Ea, N_2 = Sigma_Ea^2, N_3 = Mu_v, N_4 = site concentration
-
-        // store the variables on the heap
-        gml::variable *site = new gml::variable("site", N);
-        gml::variable *Ea = new gml::variable("Ea", N);
-        gml::variable *v = new gml::variable("v", N);
-
-        for(int i=0; i<N; ++i){
-            Ea->canonical_column[i]->mu.resize(1,1);
-            Ea->canonical_column[i]->mu(0) = kinetic_parameters[i];
-            Ea->canonical_column[i]->Sigma.resize(1,1);
-            Ea->canonical_column[i]->Sigma(0,0) = kinetic_parameters[N+i];
-
-            v->canonical_column[i]->mu.resize(1,1);
-            v->canonical_column[i]->mu(0) = kinetic_parameters[2*N+i];
-
-            site->canonical_column[i]->g = log(kinetic_parameters[3*N+i]);
-        }
-        // need to store these factors on the heap, not the stack
-        gml::factor *phi_1 = new gml::factor("site", site);
-        gml::factor *phi_2 = new gml::factor("Ea", Ea);
-        gml::factor *phi_3 = new gml::factor("v", v);
-
-        vector<gml::factor*> factors = {
-                phi_1, phi_2, phi_3
-        };
-
-        gml::probabilistic_graph surface_system (factors);
-
-        // store model
-        model = surface_system;
-    }
-
-    /**
-     * @brief: Save the model fit to a text file.
-     * @param name : name of fit file
-     */
-
-    void report_model( string name ){
-
-        // compute the signal based on the simulated reaction rates
-        composite_signal s_model = kinetic_signal(&model, T_i, T_f, ramp);// this isn't an efficient way to do this but leave it for now
-        s_model.compute_pressures();
-        s_model.interpolate_total_pressure();
-
-        // interpolate the reaction rates
-        vector<ublas::vector<double>> interpolated_signals (s_model.partial_pressures.size());
-        // interpolate to align all rows of output
-        for(int i=0; i<interpolated_signals.size(); ++i){
-            interpolated_signals[i] = analysis::lin_interp(s_model.times[i], s_model.partial_pressures[i], time);
-        }
-
-        ublas::vector<double> interpolated_sum = analysis::lin_interp(s_model.times[0], s_model.total_pressure, time);
-
-        // write to file
-        ofstream outfile;
-        outfile.open(name);
-
-        outfile << "Kinetic model fit parameters and interpolated data.\n";
-        outfile << "Site specific parameters:\n";
-        for(int i=0; i<model.variable_map["site"]->canonical_column.size(); ++i){
-            outfile << "Site " << i << ": \n";
-            outfile << "Concentration: ," << exp(model.variable_map["site"]->canonical_column[i]->g) << endl;
-            outfile << "Mean activation energy: ," << model.variable_map["Ea"]->canonical_column[i]->mu(0) << endl;
-            outfile << "Activation energy variance: ," << model.variable_map["Ea"]->canonical_column[i]->Sigma(0,0) << endl;
-            outfile << "Mean vibrational frequency: ," << model.variable_map["v"]->canonical_column[i]->mu(0) << endl;
-            outfile << endl;
-        }
-
-        outfile << "time,temperature,signal,";
-        for(int i=0; i<interpolated_signals.size(); ++i){
-            outfile << "site" << i << ",";
-        }
-        outfile << "model_composite" << endl;
-
-        for(int i=0; i<time.size(); ++i){
-            outfile << time[i] << ",";
-            outfile << temperature[i] << ",";
-            outfile << signal[i] << ",";
-            for(int j=0; j<interpolated_signals.size(); ++j){
-                outfile << interpolated_signals[j][i] << ",";
-            }
-            outfile << interpolated_sum[i] << endl;
-        }
-
-        outfile.close();
-    }
 };
 
 
