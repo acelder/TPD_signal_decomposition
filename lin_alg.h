@@ -1,6 +1,7 @@
 //
 // Created by Alexander Elder on 1/26/18.
 //
+// This file contains matrix decomposition and inversion functions. 
 
 #ifndef TPD_SIGNAL_DECOMPOSITION_LIN_ALG_H
 #define TPD_SIGNAL_DECOMPOSITION_LIN_ALG_H

@@ -1,4 +1,5 @@
 //
+// Class definition for canonical Gaussian forms and associated arithmetic operations.
 // Created by Alexander Elder on 1/26/18.
 //
 

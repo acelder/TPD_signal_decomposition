@@ -1,4 +1,5 @@
 //
+// Optimization algorithms. Will be updated as needed.
 // Created by Alexander Elder on 1/28/18.
 //
 

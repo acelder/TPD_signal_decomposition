@@ -1,4 +1,5 @@
 //
+// Numerical optimization functions in one and two dimensions. Gaussian quadrature function not yet implemented.
 // Created by Alexander Elder on 1/28/18.
 //
 
